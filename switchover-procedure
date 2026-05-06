@@ -1,1 +1,87 @@
+- PARAR OGG E INICIAR - CALIFORNIA
+- VERIFICAR HEALTHCHECK DO GSLB - DALLAS
+- PARAR BACKUP
+
+SWITCH OVER
+ 
+OKL2GT (primary database): 10.184.42.25
+OKL2TB (standby database): 10.186.38.112
+ 
+ 
+P.s.: Verifique se há ogg plugado. Caso sim, solicite a parada do ogg antes do switch over.
+ 
+ 
+0. Criar blackout no primary e standby database
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl status blackout
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl start blackout SWITCHOVER -nodeLevel
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl status blackout
+ 
+ 
+1. Abra o log do broker e alert log do banco de dados (primary e standby)
+ 
+ 
+2. Verifique os serviços que estão ativos no primary database
+$ srvctl status service -db OKL2GT -v
+ 
+ 
+3. Verifique se há gaps de archivelog (rode nas duas instâncias)
+set lines 400 
+select dest_id, status, gap_status, ERROR from V$archive_dest_status where status<>'INACTIVE';
+ 
+ 
+4. Alterar modo de proteção do banco de dados para MaxAvailability
+$ dgmgrl /
+DGMGRL> show configuration verbose
+DGMGRL> edit database "OKL2GT" set property LogXptMode=SYNC;
+Property "logxptmode" updated
+DGMGRL> edit database "OKL2TB" set property LogXptMode=SYNC;
+Property "logxptmode" updated
+DGMGRL> edit configuration set protection mode as MaxAvailability;
+Succeeded.
+DGMGRL>
+DGMGRL> validate database verbose OKL2GT;
+DGMGRL> validate database verbose OKL2TB;
+ 
+ 
+5. Force alguns switchs de logfile
+SQL> alter system switch all logfile;
+
+6. Execute o switch over (conectado no primary)
+dgmgrl sys@OKL2GT_DGMGRL 
+dgmgrl> show configuration verbose;
+dgmgrl> switchover to OKL2TB;
+ 
+ 
+7. Após a virada alterar modo de proteção do banco de dados para MaxPerformance
+$ dgmgrl /
+DGMGRL> show configuration verbose
+DGMGRL> edit database "OKL2GT" set property LogXptMode=ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit database "OKL2TB" set property LogXptMode=ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit configuration set protection mode as MaxPerformance;
+Succeeded.
+DGMGRL>
+DGMGRL> show configuration verbose;
+DGMGRL> show database OKL2gt;
+DGMGRL> show database OKL2tb;
+DGMGRL> validate database verbose OKL2gt;
+DGMGRL> validate database verbose OKL2tb;
+ 
+ 
+8. Valide se o dns fez o chaveamento automático
+nslookup cdbname.bd.intranet.pags
+nslookup pdbname.bd.intranet.pags
+
+nslookup OKL2.bd.intranet.pags
+
+ 
+9. Solicitar validação das apps.
+ 
+ 
+10. Remover blackout no primary e standby database
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl status blackout
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl stop blackout SWITCHOVER
+$ORACLE_BASE/product/agent135/agent_13.5.0.0.0/bin/emctl status blackout
+
 
